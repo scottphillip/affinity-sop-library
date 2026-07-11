@@ -32,9 +32,13 @@ SECTIONS = {
     "Regions": ["Northeast", "Southeast", "Central", "West"],
     "Consolidated Client Scorecard": ["General Process", "Special Conditions by Client", "Notable Downstream Effects"],
     "CRM": ["General", "Data Management", "Integrations"],
+    "Order Management": ["Imports"],
     "Sales Enablement Tools": ["DAX & Power BI Fundamentals", "Fiscal Years", "Navigation & How Things Work", "Report Building"],
     "Links & Resources": [],
 }
+
+# Import template files available for download
+IMPORT_TEMPLATES_DIR = Path(__file__).parent / "import_templates"
 
 
 # ─── Snowflake Connection ───
@@ -303,9 +307,37 @@ def show_search_results(query: str):
                     st.rerun()
 
 
+def show_import_templates():
+    """Show downloadable import template files."""
+    if not IMPORT_TEMPLATES_DIR.exists():
+        return
+    templates = sorted(IMPORT_TEMPLATES_DIR.glob("*.*"))
+    if not templates:
+        return
+    st.markdown("### Import Templates")
+    st.caption("Download blank templates for TELUS OMS import utilities.")
+    cols = st.columns(min(len(templates), 3))
+    for i, tpl in enumerate(templates):
+        with cols[i % 3]:
+            with open(tpl, "rb") as f:
+                st.download_button(
+                    label=f"📥 {tpl.stem}",
+                    data=f.read(),
+                    file_name=tpl.name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key=f"dl_{tpl.name}",
+                    use_container_width=True,
+                )
+    st.markdown("---")
+
+
 def show_section_content(section: str, is_admin: bool):
     """Show articles for a section, organized by category."""
     st.markdown(f"## {section}")
+
+    # Show import template downloads for Order Management
+    if section == "Order Management":
+        show_import_templates()
 
     articles = get_all_articles()
     section_articles = [a for a in articles if a[1] == section]
