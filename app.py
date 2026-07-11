@@ -172,13 +172,57 @@ def delete_link(link_id: int):
 
 
 def search_articles(query: str):
-    """Search articles by title or content."""
+    """Search articles by title or content (keyword fallback)."""
     q = f"%{query}%"
     return run_query(
         f"SELECT ID, SECTION, CATEGORY, TITLE, CONTENT FROM {KB_TABLE} "
         f"WHERE TITLE ILIKE %s OR CONTENT ILIKE %s ORDER BY SECTION, TITLE",
         (q, q)
     )
+
+
+def llm_search_articles(query: str):
+    """Use Cortex LLM to find articles matching a natural language question."""
+    articles = get_all_articles()
+    if not articles:
+        return []
+
+    # Build a catalog of articles for the LLM
+    catalog_lines = []
+    for a in articles:
+        article_id, section, category, title, content, *_ = a
+        preview = content[:200].replace("'", "''")
+        catalog_lines.append(f"ID:{article_id} | {section} > {category} | {title} | {preview}")
+    catalog = "\n".join(catalog_lines)
+
+    prompt = f"""You are a search assistant for an internal knowledge base. A user is looking for help.
+
+User question: {query}
+
+Here are all available articles (ID | Section > Category | Title | Preview):
+{catalog}
+
+Return ONLY the IDs of the articles that are relevant to the user's question, as a comma-separated list.
+If nothing matches, return NONE. Only return IDs, no explanation."""
+
+    prompt_escaped = prompt.replace("'", "''")
+    try:
+        rows = run_query(
+            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2', '{prompt_escaped}')"
+        )
+        if rows and rows[0][0]:
+            response = rows[0][0].strip()
+            if response.upper() == "NONE":
+                return []
+            # Parse IDs from response
+            ids = [int(x.strip()) for x in response.split(",") if x.strip().isdigit()]
+            if ids:
+                matched = [a for a in articles if a[0] in ids]
+                return [(a[0], a[1], a[2], a[3], a[4]) for a in matched]
+    except Exception:
+        pass
+    # Fallback to keyword search
+    return search_articles(query)
 
 
 # ─── LOGIN PAGE ───
@@ -268,7 +312,7 @@ def show_main_app():
         st.markdown("---")
 
         # Search
-        search_query = st.text_input("🔍 Search", placeholder="Search articles...")
+        search_query = st.text_input("🔍 Search", placeholder="Ask a question or describe what you need...")
 
         st.markdown("---")
 
@@ -291,11 +335,12 @@ def show_main_app():
 
 
 def show_search_results(query: str):
-    """Show search results."""
+    """Show search results using LLM-powered natural language matching."""
     st.markdown(f"### Search Results for: *{query}*")
-    results = search_articles(query)
+    with st.spinner("Searching..."):
+        results = llm_search_articles(query)
     if not results:
-        st.info("No articles found matching your search.")
+        st.info("No articles found matching your search. Try rephrasing your question.")
     else:
         st.markdown(f"Found **{len(results)}** result(s)")
         for r in results:
