@@ -618,7 +618,7 @@ def show_recommendations(is_admin: bool):
             if st.button("Generate AI Suggestions", key="gen_ai_recs"):
                 with st.spinner("Generating suggestions..."):
                     existing = run_query(
-                        f"SELECT TITLE FROM {TABLE_NAME} ORDER BY SECTION, CATEGORY"
+                        f"SELECT TITLE FROM {KB_TABLE} ORDER BY SECTION, CATEGORY"
                     )
                     existing_titles = ", ".join([r[0] for r in existing]) if existing else "None yet"
                     prompt = (
