@@ -24,6 +24,8 @@ CHARCOAL = "#2D2D2D"
 USERS_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_TICKET_APP_USERS"
 KB_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_KNOWLEDGE_BASE"
 LINKS_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_LINKS"
+RECS_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_RECOMMENDATIONS"
+RECS_VOTES_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_RECOMMENDATION_VOTES"
 ADMIN_EMAIL = "scott.phillips@affinitysales.com"
 
 # Predefined sections and categories
@@ -171,6 +173,57 @@ def delete_link(link_id: int):
     st.cache_data.clear()
 
 
+# ─── Recommendations Functions ───
+@st.cache_data(ttl=30)
+def get_recommendations():
+    return run_query(
+        f"SELECT ID, TITLE, DESCRIPTION, SUBMITTED_BY, SUBMITTED_AT, UPVOTES, STATUS "
+        f"FROM {RECS_TABLE} ORDER BY UPVOTES DESC, SUBMITTED_AT DESC"
+    )
+
+
+def submit_recommendation(title: str, description: str, submitted_by: str):
+    run_dml(
+        f"INSERT INTO {RECS_TABLE} (TITLE, DESCRIPTION, SUBMITTED_BY) VALUES (%s, %s, %s)",
+        (title, description, submitted_by)
+    )
+    st.cache_data.clear()
+
+
+def has_user_voted(rec_id: int, user_email: str) -> bool:
+    rows = run_query(
+        f"SELECT 1 FROM {RECS_VOTES_TABLE} WHERE RECOMMENDATION_ID = %s AND USER_EMAIL = %s",
+        (rec_id, user_email)
+    )
+    return len(rows) > 0
+
+
+def upvote_recommendation(rec_id: int, user_email: str):
+    run_dml(
+        f"INSERT INTO {RECS_VOTES_TABLE} (RECOMMENDATION_ID, USER_EMAIL) VALUES (%s, %s)",
+        (rec_id, user_email)
+    )
+    run_dml(
+        f"UPDATE {RECS_TABLE} SET UPVOTES = UPVOTES + 1 WHERE ID = %s",
+        (rec_id,)
+    )
+    st.cache_data.clear()
+
+
+def update_recommendation_status(rec_id: int, status: str):
+    run_dml(
+        f"UPDATE {RECS_TABLE} SET STATUS = %s WHERE ID = %s",
+        (status, rec_id)
+    )
+    st.cache_data.clear()
+
+
+def delete_recommendation(rec_id: int):
+    run_dml(f"DELETE FROM {RECS_VOTES_TABLE} WHERE RECOMMENDATION_ID = %s", (rec_id,))
+    run_dml(f"DELETE FROM {RECS_TABLE} WHERE ID = %s", (rec_id,))
+    st.cache_data.clear()
+
+
 def search_articles(query: str):
     """Search articles by title or content (keyword fallback)."""
     q = f"%{query}%"
@@ -179,6 +232,61 @@ def search_articles(query: str):
         f"WHERE TITLE ILIKE %s OR CONTENT ILIKE %s ORDER BY SECTION, TITLE",
         (q, q)
     )
+
+
+def generate_article_content(section: str, category: str, directions: str, images_text: str):
+    """Use Cortex LLM to generate a formatted article from directions."""
+    # Parse images
+    image_lines = []
+    if images_text.strip():
+        for line in images_text.strip().split("\n"):
+            line = line.strip()
+            if not line:
+                continue
+            if "|" in line:
+                url, caption = line.split("|", 1)
+                image_lines.append(f"- ![{caption.strip()}]({url.strip()})")
+            else:
+                image_lines.append(f"- ![]({line})")
+
+    images_section = "\n".join(image_lines) if image_lines else "No images provided."
+
+    prompt = f"""You are a technical documentation writer for an internal sales operations knowledge base.
+Write a well-structured markdown article based on these instructions.
+
+Section: {section}
+Category: {category}
+
+Instructions from the author:
+{directions}
+
+Available images to embed at appropriate locations:
+{images_section}
+
+Requirements:
+- Start with a # title on the first line (generate an appropriate title)
+- Use ## and ### headings to organize content logically
+- Use markdown tables where field descriptions are needed
+- Use > blockquotes for tips and important notes
+- Use **bold** for key terms and field names
+- If images were provided, embed them with ![caption](url) at relevant points in the article
+- Be thorough but concise — write for internal staff who need step-by-step guidance
+- Do not add placeholder content — only write about what was described in the instructions"""
+
+    prompt_escaped = prompt.replace("'", "''")
+    try:
+        rows = run_query(
+            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2', '{prompt_escaped}')"
+        )
+        if rows and rows[0][0]:
+            content = rows[0][0].strip()
+            # Extract title from first line
+            lines = content.split("\n", 1)
+            title = lines[0].lstrip("# ").strip()
+            return title, content
+    except Exception as e:
+        return "Untitled Article", f"Error generating article: {e}"
+    return "Untitled Article", ""
 
 
 def llm_search_articles(query: str):
@@ -317,7 +425,7 @@ def show_main_app():
         st.markdown("---")
 
         # Navigation
-        nav_options = list(SECTIONS.keys())
+        nav_options = list(SECTIONS.keys()) + ["Recommendations"]
         if is_admin:
             nav_options.append("✏️ Admin")
 
@@ -328,6 +436,8 @@ def show_main_app():
         show_search_results(search_query)
     elif selected_section == "✏️ Admin":
         show_admin_panel()
+    elif selected_section == "Recommendations":
+        show_recommendations(is_admin)
     elif selected_section == "Links & Resources":
         show_links_section(is_admin)
     else:
@@ -482,6 +592,76 @@ def show_links_section(is_admin: bool):
                     st.error("Section, title, and URL are required.")
 
 
+def show_recommendations(is_admin: bool):
+    """Show the Recommendations section."""
+    st.markdown("## SOP Recommendations")
+    st.markdown("Request new SOPs or coverage areas. Upvote existing requests to help prioritize what gets documented next.")
+
+    user_email = st.session_state.user_email
+    user_name = st.session_state.user_name
+
+    # Submit form
+    with st.expander("Submit a Recommendation", expanded=False):
+        with st.form("rec_form", clear_on_submit=True):
+            rec_title = st.text_input("Title", placeholder="e.g., How to set up EDI connections")
+            rec_desc = st.text_area("Description", placeholder="Describe what you'd like documented and why it would be helpful...", height=120)
+            if st.form_submit_button("Submit Request", type="primary", use_container_width=True):
+                if rec_title:
+                    submit_recommendation(rec_title, rec_desc, user_name)
+                    st.success("Recommendation submitted!")
+                    st.rerun()
+                else:
+                    st.error("Please enter a title.")
+
+    st.markdown("---")
+
+    # List recommendations
+    recs = get_recommendations()
+    if not recs:
+        st.info("No recommendations yet. Be the first to submit one!")
+        return
+
+    for rec in recs:
+        rec_id, title, description, submitted_by, submitted_at, upvotes, status = rec
+        status_badge = {"Open": "🟢 Open", "In Progress": "🟡 In Progress", "Done": "✅ Done"}.get(status, status)
+
+        col_main, col_vote = st.columns([5, 1])
+        with col_main:
+            st.markdown(f"**{title}**")
+            if description:
+                st.caption(description)
+            meta = f"Submitted by {submitted_by}"
+            if submitted_at:
+                meta += f" on {submitted_at.strftime('%b %d, %Y')}"
+            meta += f" | {status_badge}"
+            st.caption(meta)
+        with col_vote:
+            voted = has_user_voted(rec_id, user_email)
+            vote_label = f"👍 {upvotes}" if voted else f"☝️ {upvotes}"
+            if st.button(vote_label, key=f"vote_{rec_id}", disabled=voted, use_container_width=True):
+                upvote_recommendation(rec_id, user_email)
+                st.rerun()
+
+        # Admin controls
+        if is_admin:
+            col_status, col_del = st.columns([3, 1])
+            with col_status:
+                new_status = st.selectbox(
+                    "Status", ["Open", "In Progress", "Done"],
+                    index=["Open", "In Progress", "Done"].index(status) if status in ["Open", "In Progress", "Done"] else 0,
+                    key=f"status_{rec_id}", label_visibility="collapsed"
+                )
+                if new_status != status:
+                    update_recommendation_status(rec_id, new_status)
+                    st.rerun()
+            with col_del:
+                if st.button("🗑️", key=f"del_rec_{rec_id}"):
+                    delete_recommendation(rec_id)
+                    st.rerun()
+
+        st.markdown("---")
+
+
 def show_admin_panel():
     """Admin panel for managing content."""
     st.markdown("## Admin Panel")
@@ -491,7 +671,7 @@ def show_admin_panel():
         show_edit_article(st.session_state.editing_article)
         return
 
-    tab_new, tab_manage = st.tabs(["New Article", "Manage Articles"])
+    tab_new, tab_ai, tab_manage = st.tabs(["New Article", "AI Generate", "Manage Articles"])
 
     with tab_new:
         st.markdown("### Create New Article")
@@ -528,6 +708,74 @@ def show_admin_panel():
                     save_article(section, category, title, content, st.session_state.user_name)
                     st.success(f"Article '{title}' published!")
                     st.rerun()
+
+    with tab_ai:
+        st.markdown("### AI Article Builder")
+        st.caption("Describe what you want the article to cover and the AI will generate it for you.")
+
+        col1, col2 = st.columns(2)
+        with col1:
+            ai_section = st.selectbox("Section", [s for s in SECTIONS.keys() if s != "Links & Resources"], key="ai_section")
+        with col2:
+            ai_categories = SECTIONS.get(ai_section, [])
+            if ai_categories:
+                ai_category = st.selectbox("Category", ai_categories + ["Other"], key="ai_category")
+            else:
+                ai_category = st.text_input("Category", placeholder="e.g., General", key="ai_cat_input")
+
+        ai_directions = st.text_area(
+            "Directions",
+            height=200,
+            placeholder="Describe what the article should cover, key points, workflow steps, rules, etc.\n\n"
+                        "Example: Write an article about how to set up EDI connections. Cover the initial setup, "
+                        "testing process, common errors and how to fix them...",
+            key="ai_directions"
+        )
+
+        ai_images = st.text_area(
+            "Image URLs (one per line, optionally add a caption after a pipe |)",
+            height=100,
+            placeholder="https://raw.githubusercontent.com/.../image1.png | Import screen layout\n"
+                        "https://raw.githubusercontent.com/.../image2.png | Settings tab",
+            key="ai_images"
+        )
+
+        if st.button("Generate Article", type="primary", use_container_width=True, key="ai_gen_btn"):
+            if not ai_directions:
+                st.error("Please provide directions for the article.")
+            else:
+                with st.spinner("Generating article..."):
+                    generated_title, generated_content = generate_article_content(
+                        ai_section, ai_category if ai_category != "Other" else "General",
+                        ai_directions, ai_images
+                    )
+                    st.session_state.ai_generated_title = generated_title
+                    st.session_state.ai_generated_content = generated_content
+
+        # Show generated content if available
+        if st.session_state.get("ai_generated_content"):
+            st.markdown("---")
+            st.markdown("### Generated Article (Review & Edit)")
+            final_title = st.text_input("Title", value=st.session_state.get("ai_generated_title", ""), key="ai_final_title")
+            final_content = st.text_area("Content", value=st.session_state.ai_generated_content, height=400, key="ai_final_content")
+
+            with st.expander("Preview"):
+                st.markdown(final_content)
+
+            if st.button("Publish Article", type="primary", use_container_width=True, key="ai_publish_btn"):
+                if final_title and final_content:
+                    save_article(
+                        ai_section,
+                        ai_category if ai_category != "Other" else "General",
+                        final_title, final_content,
+                        st.session_state.user_name
+                    )
+                    st.session_state.ai_generated_title = ""
+                    st.session_state.ai_generated_content = ""
+                    st.success(f"Article '{final_title}' published!")
+                    st.rerun()
+                else:
+                    st.error("Title and content are required.")
 
     with tab_manage:
         st.markdown("### All Articles")
