@@ -35,6 +35,7 @@ SECTIONS = {
     "Consolidated Client Scorecard": ["General Process", "Special Conditions by Client", "Notable Downstream Effects"],
     "CRM": ["General", "Data Management", "Integrations"],
     "Order Management": ["Imports"],
+    "Systems": ["Manufacturer Related"],
     "Sales Enablement Tools": ["DAX & Power BI Fundamentals", "Fiscal Years", "Navigation & How Things Work", "Report Building"],
     "Links & Resources": [],
 }
