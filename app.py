@@ -30,11 +30,9 @@ ADMIN_EMAIL = "scott.phillips@affinitysales.com"
 
 # Predefined sections and categories
 SECTIONS = {
-    "CSS": ["Order Entry", "Import Servers", "General Processes", "Troubleshooting"],
-    "Regions": ["Northeast", "Southeast", "Central", "West"],
+    "Order Management": ["Imports", "EDI", "Data Quality"],
     "Consolidated Client Scorecard": ["General Process", "Special Conditions by Client", "Notable Downstream Effects"],
     "CRM": ["General", "Data Management", "Integrations"],
-    "Order Management": ["Imports"],
     "Sales Enablement Tools": ["DAX & Power BI Fundamentals", "Fiscal Years", "Navigation & How Things Work", "Report Building"],
     "Links & Resources": [],
 }
@@ -612,6 +610,61 @@ def show_recommendations(is_admin: bool):
                     st.rerun()
                 else:
                     st.error("Please enter a title.")
+
+    # AI Suggestions (admin only)
+    if is_admin:
+        with st.expander("AI Suggested Topics", expanded=False):
+            st.caption("Generate SOP topic ideas based on what's already documented and common distribution/order management workflows.")
+            if st.button("Generate AI Suggestions", key="gen_ai_recs"):
+                with st.spinner("Generating suggestions..."):
+                    existing = run_query(
+                        f"SELECT TITLE FROM {TABLE_NAME} ORDER BY SECTION, CATEGORY"
+                    )
+                    existing_titles = ", ".join([r[0] for r in existing]) if existing else "None yet"
+                    prompt = (
+                        "You are an SOP documentation advisor for a food and beverage distribution company "
+                        "that uses the 1FS order management system. The company manages manufacturers, distributors, "
+                        "ship-to locations, item codes, pricing, EDI connections, commissions, and broker relationships.\n\n"
+                        f"Existing documented SOPs: {existing_titles}\n\n"
+                        "Suggest 8 new SOP topics that are NOT already covered. Focus on common operational needs: "
+                        "data quality (duplicate identification, cleanup), imports/exports, EDI setup, "
+                        "pricing workflows, commission management, ship-to management, manufacturer onboarding, "
+                        "and system utilities. For each, give a short title and one-sentence description.\n\n"
+                        "Format each as:\nTitle: <title>\nDescription: <description>\n"
+                    )
+                    prompt_escaped = prompt.replace("'", "''")
+                    try:
+                        rows = run_query(
+                            f"SELECT SNOWFLAKE.CORTEX.COMPLETE('mistral-large2', '{prompt_escaped}')"
+                        )
+                        if rows and rows[0][0]:
+                            st.session_state["ai_suggestions"] = rows[0][0].strip()
+                    except Exception as e:
+                        st.error(f"Error generating suggestions: {e}")
+
+            if "ai_suggestions" in st.session_state and st.session_state["ai_suggestions"]:
+                suggestions_text = st.session_state["ai_suggestions"]
+                st.markdown(suggestions_text)
+                st.markdown("---")
+                st.caption("Click below to submit any suggestion as a recommendation:")
+                lines = suggestions_text.split("\n")
+                current_title = None
+                current_desc = None
+                idx = 0
+                for line in lines:
+                    line = line.strip()
+                    if line.lower().startswith("title:"):
+                        current_title = line[6:].strip().strip("*")
+                    elif line.lower().startswith("description:"):
+                        current_desc = line[12:].strip()
+                    if current_title and current_desc:
+                        if st.button(f"Submit: {current_title}", key=f"ai_rec_{idx}"):
+                            submit_recommendation(current_title, current_desc, "AI Suggestion")
+                            st.success(f"Submitted: {current_title}")
+                            st.rerun()
+                        current_title = None
+                        current_desc = None
+                        idx += 1
 
     st.markdown("---")
 
