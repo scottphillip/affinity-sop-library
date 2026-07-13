@@ -26,7 +26,7 @@ KB_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_KNOWLEDGE_BASE"
 LINKS_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_LINKS"
 RECS_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_RECOMMENDATIONS"
 RECS_VOTES_TABLE = "DB_PROD_TRF.SCH_TRF_UTILS.TB_SOP_RECOMMENDATION_VOTES"
-ADMIN_EMAIL = "scott.phillips@affinitysales.com"
+ADMIN_EMAILS = ["scott.phillips@affinitysales.com", "lisa.jackson@affinitysales.com"]
 
 # Predefined sections and categories
 SECTIONS = {
@@ -399,7 +399,7 @@ def show_login():
 def show_main_app():
     user_name = st.session_state.user_name
     user_email = st.session_state.user_email
-    is_admin = (user_email == ADMIN_EMAIL)
+    is_admin = (user_email in ADMIN_EMAILS)
 
     # ── Sidebar ──
     with st.sidebar:
