@@ -7,9 +7,11 @@ Content is stored in Snowflake and rendered inline as markdown.
 import streamlit as st
 import json
 import hashlib
+import uuid
 import snowflake.connector
 from datetime import datetime
 from pathlib import Path
+import extra_streamlit_components as stx
 
 st.set_page_config(
     page_title="SOP & Knowledge Base | Affinity Group",
@@ -115,6 +117,29 @@ def create_user(email: str, display_name: str, password: str):
         f"INSERT INTO {USERS_TABLE} (EMAIL, DISPLAY_NAME, PASSWORD_HASH) VALUES (%s, %s, %s)",
         (email, display_name, hash_password(password))
     )
+
+
+def generate_remember_token(email: str) -> str:
+    """Generate a token and store in DB for remember-me."""
+    token = uuid.uuid4().hex
+    run_dml(
+        f"UPDATE {USERS_TABLE} SET REMEMBER_TOKEN = %s WHERE EMAIL = %s",
+        (token, email)
+    )
+    return token
+
+
+def validate_remember_token(token: str):
+    """Check if token is valid and return email + display name."""
+    if not token:
+        return None
+    rows = run_query(
+        f"SELECT EMAIL, DISPLAY_NAME FROM {USERS_TABLE} WHERE REMEMBER_TOKEN = %s",
+        (token,)
+    )
+    if rows:
+        return rows[0]
+    return None
 
 
 # ─── Knowledge Base Functions ───
@@ -331,6 +356,14 @@ If nothing matches, return NONE. Only return IDs, no explanation."""
     return search_articles(query)
 
 
+# ─── Cookie Manager ───
+@st.cache_resource
+def get_cookie_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_cookie_manager()
+
+
 # ─── LOGIN PAGE ───
 def show_login():
     st.markdown(f"""
@@ -346,6 +379,7 @@ def show_login():
         with st.form("login_form"):
             email = st.text_input("Email", placeholder="yourname@affinitysales.com", key="login_email")
             password = st.text_input("Password", type="password", key="login_pw")
+            remember = st.checkbox("Keep me signed in", value=True, key="remember_me")
             login_btn = st.form_submit_button("Sign In", use_container_width=True, type="primary")
 
         if login_btn:
@@ -364,6 +398,9 @@ def show_login():
                     st.session_state.logged_in = True
                     st.session_state.user_email = email_lower
                     st.session_state.user_name = directory[email_lower]
+                    if remember:
+                        token = generate_remember_token(email_lower)
+                        cookie_manager.set("affinity_kb_token", token, max_age=60*60*24*90)
                     st.rerun()
 
     with tab_register:
@@ -392,6 +429,8 @@ def show_login():
                     st.session_state.logged_in = True
                     st.session_state.user_email = email_lower
                     st.session_state.user_name = directory[email_lower]
+                    token = generate_remember_token(email_lower)
+                    cookie_manager.set("affinity_kb_token", token, max_age=60*60*24*90)
                     st.rerun()
 
 
@@ -413,6 +452,11 @@ def show_main_app():
         st.markdown(f"**{user_name}**")
         if st.button("Sign Out", use_container_width=True):
             st.session_state.logged_in = False
+            cookie_manager.delete("affinity_kb_token")
+            run_dml(
+                f"UPDATE {USERS_TABLE} SET REMEMBER_TOKEN = NULL WHERE EMAIL = %s",
+                (user_email,)
+            )
             st.rerun()
 
         st.markdown("---")
@@ -900,4 +944,13 @@ def show_edit_article(article_id: int):
 if st.session_state.get("logged_in"):
     show_main_app()
 else:
+    # Try auto-login from cookie before showing login page
+    token = cookie_manager.get("affinity_kb_token")
+    if token:
+        user_info = validate_remember_token(token)
+        if user_info:
+            st.session_state.logged_in = True
+            st.session_state.user_email = user_info[0]
+            st.session_state.user_name = user_info[1]
+            st.rerun()
     show_login()
