@@ -19,6 +19,22 @@ st.set_page_config(
     layout="wide",
 )
 
+# ─── Global CSS: constrain image sizes ───
+st.markdown("""
+<style>
+    /* Constrain images rendered inside markdown content */
+    [data-testid="stExpander"] img,
+    [data-testid="stMarkdownContainer"] img {
+        max-width: 600px;
+        width: 100%;
+        height: auto;
+        border-radius: 6px;
+        margin: 8px 0;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.12);
+    }
+</style>
+""", unsafe_allow_html=True)
+
 # Brand colors
 ORANGE = "#F5921E"
 CHARCOAL = "#2D2D2D"
@@ -32,7 +48,7 @@ ADMIN_EMAILS = ["scott.phillips@affinitysales.com", "lisa.jackson@affinitysales.
 
 # Predefined sections and categories
 SECTIONS = {
-    "Order Management": ["Imports", "EDI", "Data Quality"],
+    "Order Management": ["Imports", "EDI", "Master Data Management", "Data Quality"],
     "Consolidated Client Scorecard": ["General Process", "Special Conditions by Client", "Notable Downstream Effects"],
     "CRM": ["General", "Data Management", "Integrations"],
     "Sales Enablement Tools": ["DAX & Power BI Fundamentals", "Fiscal Years", "Navigation & How Things Work", "Report Building"],
