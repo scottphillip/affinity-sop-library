@@ -359,16 +359,22 @@ If nothing matches, return NONE. Only return IDs, no explanation."""
         )
         if rows and rows[0][0]:
             response = rows[0][0].strip()
-            if response.upper() == "NONE":
-                return []
-            # Parse IDs from response
-            ids = [int(x.strip()) for x in response.split(",") if x.strip().isdigit()]
-            if ids:
-                matched = [a for a in articles if a[0] in ids]
-                return [(a[0], a[1], a[2], a[3], a[4]) for a in matched]
+            if response.upper() != "NONE":
+                ids = [int(x.strip()) for x in response.split(",") if x.strip().isdigit()]
+                if ids:
+                    matched = [a for a in articles if a[0] in ids]
+                    llm_hits = [(a[0], a[1], a[2], a[3], a[4]) for a in matched]
+                    # Always include keyword matches so new articles are findable
+                    kw_hits = search_articles(query)
+                    seen = {r[0] for r in llm_hits}
+                    for r in kw_hits:
+                        if r[0] not in seen:
+                            llm_hits.append(r)
+                    if llm_hits:
+                        return llm_hits
     except Exception:
         pass
-    # Fallback to keyword search
+    # Fallback to keyword search (Cortex NONE, parse miss, or Cortex unavailable)
     return search_articles(query)
 
 
