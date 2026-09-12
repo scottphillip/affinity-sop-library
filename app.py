@@ -48,7 +48,7 @@ ADMIN_EMAILS = ["scott.phillips@affinitysales.com", "lisa.jackson@affinitysales.
 
 # Predefined sections and categories
 SECTIONS = {
-    "Order Management": ["Imports", "EDI", "Master Data Management", "Data Quality"],
+    "Order Management": ["Imports", "Payment Import", "EDI", "Master Data Management", "Data Quality"],
     "Consolidated Client Scorecard": ["General Process", "Special Conditions by Client", "Notable Downstream Effects"],
     "CRM": ["General", "Data Management", "Integrations"],
     "Sales Enablement Tools": ["DAX & Power BI Fundamentals", "Fiscal Years", "Navigation & How Things Work", "Report Building"],
