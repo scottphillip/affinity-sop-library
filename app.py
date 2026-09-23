@@ -8,10 +8,11 @@ import streamlit as st
 import json
 import hashlib
 import uuid
-import snowflake.connector
 from datetime import datetime
 from pathlib import Path
 import extra_streamlit_components as stx
+
+from sf_auth import connect_snowflake
 
 st.set_page_config(
     page_title="SOP & Knowledge Base | Affinity Group",
@@ -62,12 +63,14 @@ IMPORT_TEMPLATES_DIR = Path(__file__).parent / "import_templates"
 # ─── Snowflake Connection ───
 @st.cache_resource
 def get_snowflake_conn():
-    return snowflake.connector.connect(
-        account=st.secrets["snowflake"]["account"],
-        user=st.secrets["snowflake"]["user"],
-        password=st.secrets["snowflake"]["password"],
-        warehouse=st.secrets["snowflake"]["warehouse"],
-        role=st.secrets["snowflake"]["role"],
+    sf = st.secrets["snowflake"]
+    return connect_snowflake(
+        account=sf.get("account"),
+        role=sf.get("role"),
+        warehouse=sf.get("warehouse"),
+        private_key_pem=sf.get("private_key"),
+        user=sf.get("user"),
+        password=sf.get("password"),
     )
 
 
